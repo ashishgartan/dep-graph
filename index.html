@@ -1,1 +1,1564 @@
 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DepGraph — Project Dependency Visualizer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --bg2: #111113;
+    --bg3: #1a1a1f;
+    --border: #242429;
+    --text: #f0f0f2;
+    --text2: #8888a0;
+    --text3: #444455;
+    --accent: #7c6aff;
+    --accent2: #a78bfa;
+    --accent3: #c4b5fd;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --cyan: #22d3ee;
+    --node-default: #1e1e2e;
+    --node-border: #3a3a5c;
+    --edge: #2a2a40;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, 'SF Pro Text', BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* TOP BAR */
+  header {
+    height: 52px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 16px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 15px; font-weight: 600; letter-spacing: -0.3px;
+    color: var(--text);
+  }
+  .logo-icon {
+    width: 26px; height: 26px;
+    background: var(--accent);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .logo-icon svg { width: 14px; height: 14px; }
+  .header-sep { width: 1px; height: 20px; background: var(--border); }
+  .header-stats { display: flex; gap: 16px; }
+  .stat { font-size: 12px; color: var(--text2); }
+  .stat b { color: var(--text); font-weight: 500; }
+  .header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .btn-sm {
+    padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 500;
+    cursor: pointer; border: 1px solid var(--border);
+    background: var(--bg3); color: var(--text2);
+    font-family: inherit; transition: all 0.15s;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .btn-sm:hover { background: var(--bg3); color: var(--text); border-color: var(--accent); }
+  .btn-sm.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* LAYOUT */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* SIDEBAR */
+  .sidebar {
+    width: 260px;
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .sidebar-head {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-title { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); }
+  .file-list {
+    flex: 1; overflow-y: auto;
+    padding: 8px 0;
+  }
+  .file-list::-webkit-scrollbar { width: 4px; }
+  .file-list::-webkit-scrollbar-track { background: transparent; }
+  .file-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .file-item {
+    padding: 7px 16px;
+    font-size: 12px; color: var(--text2);
+    cursor: pointer;
+    display: flex; align-items: center; gap: 8px;
+    transition: background 0.1s, color 0.1s;
+    border-left: 2px solid transparent;
+  }
+  .file-item:hover { background: var(--bg3); color: var(--text); }
+  .file-item.selected { background: rgba(124,106,255,0.1); color: var(--accent3); border-left-color: var(--accent); }
+  .file-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-count { font-size: 10px; background: var(--bg3); padding: 1px 6px; border-radius: 8px; color: var(--text3); }
+
+  /* INFO PANEL */
+  .info-panel {
+    border-top: 1px solid var(--border);
+    padding: 14px 16px;
+    min-height: 140px;
+  }
+  .info-title { font-size: 11px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--text3); margin-bottom: 10px; }
+  .info-filename { font-size: 13px; font-weight: 500; color: var(--text); margin-bottom: 8px; word-break: break-all; }
+  .info-row { display: flex; justify-content: space-between; font-size: 12px; color: var(--text2); margin-bottom: 4px; }
+  .info-row b { color: var(--text); font-weight: 500; }
+  .info-imports { margin-top: 10px; }
+  .info-import-item { font-size: 11px; color: var(--accent2); padding: 2px 0; display: flex; align-items: center; gap: 6px; }
+  .info-import-item::before { content: '→'; color: var(--text3); }
+  .info-empty { font-size: 12px; color: var(--text3); font-style: italic; }
+
+  /* CANVAS AREA */
+  .canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg);
+    background-image:
+      radial-gradient(circle at 20% 20%, rgba(124,106,255,0.04) 0%, transparent 50%),
+      radial-gradient(circle at 80% 80%, rgba(34,211,238,0.03) 0%, transparent 50%);
+  }
+
+  /* DROP ZONE */
+  #dropzone {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px; z-index: 5;
+  }
+  .drop-box {
+    border: 1.5px dashed var(--border);
+    border-radius: 20px;
+    padding: 48px 64px;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 16px;
+    transition: border-color 0.2s, background 0.2s;
+    cursor: pointer;
+    text-align: center;
+  }
+  .drop-box:hover, .drop-box.dragover {
+    border-color: var(--accent);
+    background: rgba(124,106,255,0.05);
+  }
+  .drop-icon {
+    width: 56px; height: 56px;
+    background: var(--bg3);
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border);
+  }
+  .drop-icon svg { width: 26px; height: 26px; color: var(--accent); }
+  .drop-title { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
+  .drop-sub { font-size: 13px; color: var(--text2); line-height: 1.5; }
+  .drop-hint { font-size: 11px; color: var(--text3); }
+  .drop-btn {
+    margin-top: 4px;
+    padding: 10px 24px; border-radius: 10px;
+    background: var(--accent); color: #fff;
+    font-size: 14px; font-weight: 500; font-family: inherit;
+    border: none; cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .drop-btn:hover { opacity: 0.85; }
+  #file-input { display: none; }
+  #folder-input { display: none; }
+  .upload-btns { display: flex; gap: 10px; margin-top: 4px; }
+  .drop-btn-outline {
+    padding: 10px 24px; border-radius: 10px;
+    background: transparent; color: var(--accent2);
+    font-size: 14px; font-weight: 500; font-family: inherit;
+    border: 1px solid rgba(124,106,255,0.4); cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .drop-btn-outline:hover { background: rgba(124,106,255,0.08); border-color: var(--accent); }
+  .drop-divider { font-size: 12px; color: var(--text3); display: flex; align-items: center; }
+
+  /* SVG GRAPH */
+  #graph-svg {
+    width: 100%; height: 100%;
+    display: none;
+  }
+  .link { stroke: var(--edge); stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+  .link.highlighted { stroke: var(--accent); stroke-width: 2; opacity: 1 !important; }
+  .link.dimmed { opacity: 0.05; }
+
+  .node-group { cursor: pointer; }
+  .node-rect {
+    fill: var(--node-default);
+    stroke: var(--node-border);
+    stroke-width: 1;
+    rx: 8;
+    transition: all 0.15s;
+  }
+  .node-group:hover .node-rect { stroke: var(--accent); stroke-width: 1.5; }
+  .node-group.selected .node-rect { stroke: var(--accent); stroke-width: 2; fill: rgba(124,106,255,0.15); }
+  .node-group.highlighted .node-rect { stroke: var(--green); stroke-width: 2; }
+  .node-group.dimmed { opacity: 0.15; }
+
+  .node-label {
+    font-family: -apple-system, 'SF Pro Text', BlinkMacSystemFont, sans-serif;
+    font-size: 11px; font-weight: 500;
+    fill: var(--text); pointer-events: none;
+  }
+  .node-ext {
+    font-size: 9px; fill: var(--text3);
+  }
+
+  /* CONTROLS */
+  .controls {
+    position: absolute; bottom: 20px; right: 20px;
+    display: flex; flex-direction: column; gap: 6px;
+    z-index: 10;
+  }
+  .ctrl-btn {
+    width: 32px; height: 32px;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; color: var(--text2); font-size: 16px; font-weight: 300;
+    transition: all 0.15s; user-select: none;
+  }
+  .ctrl-btn:hover { color: var(--text); border-color: var(--accent); }
+
+  /* LEGEND */
+  .legend {
+    position: absolute; bottom: 20px; left: 280px;
+    display: flex; gap: 16px; align-items: center;
+    font-size: 11px; color: var(--text3);
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 8px 14px;
+    z-index: 10;
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  /* TOAST */
+  .toast {
+    position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 18px;
+    font-size: 13px; color: var(--text2);
+    z-index: 100; display: none;
+    white-space: nowrap;
+  }
+  .toast.show { display: block; animation: fadeInDown 0.2s ease; }
+  @keyframes fadeInDown { from { opacity:0; transform: translateX(-50%) translateY(-8px); } to { opacity:1; transform: translateX(-50%) translateY(0); } }
+
+  /* CIRCULAR WARNING */
+  .circular-badge {
+    position: absolute; top: 16px; right: 16px;
+    background: rgba(248,113,113,0.1); border: 1px solid rgba(248,113,113,0.3);
+    border-radius: 10px; padding: 8px 14px;
+    font-size: 12px; color: var(--red);
+    display: none; z-index: 10;
+  }
+
+  /* ── VIEW SWITCHER ────────────────────────────────────────────────── */
+  .view-switcher {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    display: none; gap: 4px; z-index: 20;
+    background: var(--bg2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 4px;
+  }
+  .view-switcher.visible { display: flex; }
+  .vs-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border-radius: 8px;
+    font-size: 12px; font-weight: 500;
+    cursor: pointer; border: none;
+    background: transparent; color: var(--text2);
+    font-family: inherit; transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .vs-btn:hover { color: var(--text); background: var(--bg3); }
+  .vs-btn.active { background: var(--accent); color: #fff; }
+  .vs-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+  /* ── CANVAS VIEWS ─────────────────────────────────────────────────── */
+  #view-force { width:100%; height:100%; display:none; }
+  #view-sunburst { width:100%; height:100%; display:none; }
+  #view-matrix-wrap { width:100%; height:100%; display:none; overflow:auto; padding:20px; }
+  #view-treemap { width:100%; height:100%; display:none; position:relative; }
+  #view-arc { width:100%; height:100%; display:none; overflow:auto; }
+
+  /* matrix */
+  .mx-table { border-collapse:collapse; font-size:10px; }
+  .mx-table th, .mx-table td { width:24px; height:24px; text-align:center; vertical-align:middle; border:0.5px solid var(--border); }
+  .mx-table th { font-weight:500; color:var(--text2); background:var(--bg2); }
+  .mx-col-label { writing-mode:vertical-rl; transform:rotate(180deg); font-size:9px; max-width:24px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; height:70px; vertical-align:bottom; padding-bottom:3px; }
+  .mx-row-label { font-size:9px; text-align:right; padding-right:4px; white-space:nowrap; max-width:70px; overflow:hidden; text-overflow:ellipsis; }
+  .mx-cell { cursor:pointer; transition:background 0.1s; }
+  .mx-cell.direct { background:var(--accent); }
+  .mx-cell.transitive { background:rgba(124,106,255,0.2); }
+  .mx-cell.diagonal { background:var(--bg3); }
+  .mx-cell.row-hi, .mx-cell.col-hi { background:rgba(124,106,255,0.1) !important; outline:1px solid var(--accent); }
+
+  /* treemap */
+  .tm-block {
+    position:absolute; border:2px solid var(--bg);
+    border-radius:6px; overflow:hidden; cursor:pointer;
+    transition:filter 0.15s;
+    display:flex; flex-direction:column; justify-content:flex-end; padding:5px 7px;
+  }
+  .tm-block:hover { filter:brightness(1.15); }
+  .tm-name { font-size:10px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tm-info { font-size:9px; opacity:0.7; margin-top:1px; }
+  .tm-tip {
+    position:absolute; bottom:10px; left:50%; transform:translateX(-50%);
+    background:var(--bg2); border:1px solid var(--border); border-radius:8px;
+    padding:7px 12px; font-size:11px; color:var(--text); white-space:nowrap;
+    pointer-events:none; display:none; z-index:20;
+  }
+
+  /* arc */
+  #arc-svg { display:block; }
+  .arc-link { fill:none; transition:opacity 0.15s, stroke-width 0.15s; cursor:pointer; }
+  .arc-node-circle { transition:r 0.15s, opacity 0.15s; cursor:pointer; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="7" x2="5" y2="17"/><line x1="12" y1="7" x2="19" y2="17"/></svg>
+    </div>
+    DepGraph
+  </div>
+  <div class="header-sep"></div>
+  <div class="header-stats" id="header-stats" style="display:none">
+    <span class="stat"><b id="stat-files">0</b> files</span>
+    <span class="stat"><b id="stat-deps">0</b> dependencies</span>
+    <span class="stat"><b id="stat-circular">0</b> circular</span>
+  </div>
+  <div class="header-right">
+    <button class="btn-sm" id="btn-layout" style="display:none" onclick="resetLayout()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h7v7H3z"/><path d="M14 3h7v7h-7z"/><path d="M14 14h7v7h-7z"/><path d="M3 14h7v7H3z"/></svg>
+      Reset layout
+    </button>
+    <button class="btn-sm" id="btn-new" style="display:none" onclick="resetAll()">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Upload new
+    </button>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-head">
+      <div class="sidebar-title">Files</div>
+    </div>
+    <div class="file-list" id="file-list">
+      <div style="padding:16px;font-size:12px;color:var(--text3);font-style:italic;">No project loaded</div>
+    </div>
+    <div class="info-panel" id="info-panel">
+      <div class="info-title">Details</div>
+      <div class="info-empty">Click a node to inspect</div>
+    </div>
+  </div>
+
+  <div class="canvas-wrap">
+    <div id="dropzone">
+      <div class="drop-box" id="drop-box">
+        <div class="drop-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </div>
+        <div class="drop-title">Drop your project ZIP</div>
+        <div class="drop-sub">All file types supported — tracks imports, exports &amp;<br/>use-cases across JS/TS, Python, Go, Rust, CSS, JSON and more</div>
+        <div class="upload-btns">
+          <button class="drop-btn" onclick="document.getElementById('file-input').click()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Upload ZIP
+          </button>
+          <div class="drop-divider">or</div>
+          <button class="drop-btn-outline" onclick="document.getElementById('folder-input').click()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline;vertical-align:middle;margin-right:6px"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            Upload Folder
+          </button>
+        </div>
+        <div class="drop-hint">All processing happens in your browser — nothing is uploaded</div>
+      </div>
+    </div>
+    <input type="file" id="file-input" accept=".zip" />
+    <input type="file" id="folder-input" webkitdirectory multiple />
+    <!-- View switcher toolbar -->
+    <div class="view-switcher" id="view-switcher">
+      <button class="vs-btn active" id="vs-force" onclick="switchView('force')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="7" x2="5" y2="17"/><line x1="12" y1="7" x2="19" y2="17"/></svg>
+        Force graph
+      </button>
+      <button class="vs-btn" id="vs-sunburst" onclick="switchView('sunburst')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8" stroke-dasharray="4 2"/><circle cx="12" cy="12" r="11" stroke-dasharray="6 3"/></svg>
+        Sunburst
+      </button>
+      <button class="vs-btn" id="vs-matrix" onclick="switchView('matrix')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Matrix
+      </button>
+      <button class="vs-btn" id="vs-treemap" onclick="switchView('treemap')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="10" height="10"/><rect x="15" y="3" width="6" height="6"/><rect x="3" y="15" width="6" height="6"/><rect x="11" y="15" width="10" height="6"/></svg>
+        Treemap
+      </button>
+      <button class="vs-btn" id="vs-arc" onclick="switchView('arc')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20 Q4 4 20 4"/><path d="M4 20 Q12 4 20 20"/><line x1="4" y1="20" x2="20" y2="20"/></svg>
+        Arc
+      </button>
+    </div>
+
+    <!-- Force graph (original) -->
+    <svg id="view-force">
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#2a2a40" />
+        </marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L0,6 L8,3 z" fill="#7c6aff" />
+        </marker>
+      </defs>
+      <g id="zoom-group"></g>
+    </svg>
+
+    <!-- Sunburst view -->
+    <svg id="view-sunburst"></svg>
+
+    <!-- Matrix view -->
+    <div id="view-matrix-wrap"><table class="mx-table" id="mx-table"></table></div>
+
+    <!-- Treemap view -->
+    <div id="view-treemap"><div class="tm-tip" id="tm-tip"></div></div>
+
+    <!-- Arc diagram view -->
+    <div id="view-arc"><svg id="arc-svg"></svg></div>
+
+    <div class="controls" id="controls" style="display:none">
+      <div class="ctrl-btn" onclick="zoomIn()" title="Zoom in">+</div>
+      <div class="ctrl-btn" onclick="zoomOut()" title="Zoom out">−</div>
+      <div class="ctrl-btn" onclick="zoomFit()" title="Fit to screen" style="font-size:11px">⊡</div>
+    </div>
+
+    <div class="legend" id="legend" style="display:none">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div> Selected</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Connected</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> Circular</div>
+      <div class="legend-item"><div style="width:20px;height:1px;border-top:1.5px dashed #a855f7;display:inline-block;margin-right:4px"></div> Style</div>
+      <div class="legend-item"><div style="width:20px;height:1px;border-top:1.5px dotted #facc15;display:inline-block;margin-right:4px"></div> Data</div>
+    </div>
+
+    <div class="circular-badge" id="circular-badge"></div>
+    <div class="toast" id="toast"></div>
+  </div>
+</div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────
+let graphData = { nodes: [], edges: [] };
+let simulation = null;
+let svgZoom = null;
+let selectedNode = null;
+let circularPairs = new Set();
+
+// ── FOLDER PROCESSING ──────────────────────────────────────────────────
+async function processFolder(fileList) {
+  showToast('Reading folder...');
+  resetAliasRoot();
+  const SUPPORTED_RE = /\.[a-zA-Z0-9]+$|\bDockerfile\b|\b\.env\b/i;
+  const ignore = /node_modules|\.git|\.next|__pycache__|\.DS_Store|\.min\.|\.map$/;
+
+  const allFiles = [];
+  const fileContents = {};
+
+  for (const file of fileList) {
+    const path = file.webkitRelativePath || file.name;
+    if (ignore.test(path)) continue;
+    if (!SUPPORTED_RE.test(path)) continue;
+    // strip top-level folder name
+    const cleanPath = path.includes('/') ? path.substring(path.indexOf('/') + 1) : path;
+    try {
+      const content = await file.text();
+      allFiles.push(cleanPath);
+      fileContents[cleanPath] = content;
+    } catch(e) {}
+  }
+
+  if (allFiles.length === 0) {
+    showToast('No supported source files found in folder.');
+    return;
+  }
+
+  showToast(`Analyzing ${allFiles.length} files...`);
+
+  const edges = [];
+  const edgeSet = new Set();
+
+  for (const file of allFiles) {
+    const refs = analyzeFile(fileContents[file] || '', file);
+    for (const ref of refs) {
+      const resolved = resolveImport(ref, file, allFiles);
+      if (resolved && resolved !== file) {
+        const key = `${file}→${resolved}`;
+        if (!edgeSet.has(key)) {
+          edgeSet.add(key);
+          const edgeType = detectEdgeType(ref, fileContents[file] || '');
+          edges.push({ source: file, target: resolved, type: edgeType });
+        }
+      }
+    }
+  }
+
+  const connected = new Set();
+  edges.forEach(e => { connected.add(e.source); connected.add(e.target); });
+  const nodes = allFiles.map(f => ({ id: f, color: fileColor(f), isolated: !connected.has(f) }));
+
+  circularPairs = detectCircular(edges);
+  graphData = { nodes, edges };
+
+  currentView = 'force';
+  renderGraph();
+  renderSidebar();
+  updateStats();
+  document.getElementById('dropzone').style.display = 'none';
+  document.getElementById('controls').style.display = 'flex';
+  document.getElementById('legend').style.display = 'flex';
+  document.getElementById('btn-layout').style.display = 'flex';
+  document.getElementById('btn-new').style.display = 'flex';
+  document.getElementById('header-stats').style.display = 'flex';
+  document.getElementById('view-switcher').classList.add('visible');
+
+  if (circularPairs.size > 0) {
+    const badge = document.getElementById('circular-badge');
+    badge.textContent = `⚠ ${circularPairs.size} circular dependenc${circularPairs.size === 1 ? 'y' : 'ies'} detected`;
+    badge.style.display = 'block';
+  }
+
+  showToast(`✓ ${nodes.length} files · ${edges.length} dependencies mapped`);
+}
+
+// ── FILE PARSING ───────────────────────────────────────────────────────
+const SUPPORTED = /\.[a-zA-Z0-9]+$|\bDockerfile\b|\b\.env\b/i;
+
+const IMPORT_PATTERNS = [
+  // JS/TS: import x from '...', import { x } from '...', import * as x from '...'
+  /import\s+(?:[\w\s{},*]+\s+from\s+)?['"]([^'"]+)['"]/g,
+  // JS/TS: require('...')
+  /require\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  // JS/TS: export ... from '...'
+  /export\s+(?:[\w\s{},*]+\s+from\s+)?['"]([^'"]+)['"]/g,
+  // JS/TS: dynamic import('...')
+  /import\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  // Python: from x import y, import x
+  /^from\s+([\w.]+)\s+import/gm,
+  /^import\s+([\w.]+)/gm,
+  // Ruby: require, require_relative
+  /require(?:_relative)?\s+['"]([^'"]+)['"]/g,
+  // Go: import "...", import ( "..." )
+  /import\s+(?:\w+\s+)?['"]([^'"]+)['"]/g,
+  // Rust: mod x; use x::y;
+  /^use\s+([\w:]+)/gm,
+  /^mod\s+(\w+)/gm,
+  // Java/Kotlin: import x.y.z
+  /^import\s+(?:static\s+)?([\w.]+)/gm,
+  // C/C++: #include "..." or #include <...>
+  /#include\s+[<"]([^>"]+)[>"]/g,
+  // PHP: require, include, use
+  /(?:require|include)(?:_once)?\s+['"]([^'"]+)['"]/g,
+  /^use\s+([\w\\]+)/gm,
+  // CSS/SCSS: @import, @use, @forward
+  /@import\s+['"]([^'"]+)['"]/g,
+  /@use\s+['"]([^'"]+)['"]/g,
+  /@forward\s+['"]([^'"]+)['"]/g,
+  // HTML: src="...", href="..."
+  /(?:src|href)=['"]\.([^'"]+)['"]/g,
+  // GraphQL: #import
+  /#import\s+['"]([^'"]+)['"]/g,
+  // Dart: import '...'
+  /^import\s+['"]([^'"]+)['"]/gm,
+  // Elixir: import, alias, use
+  /^(?:import|alias|use)\s+([\w.]+)/gm,
+  // Lua: require('...')
+  /require\s*['"]([^'"]+)['"]/g,
+  // Swift: import Module
+  /^import\s+(\w+)/gm,
+];
+
+// ── COMPREHENSIVE REFERENCE EXTRACTOR ────────────────────────────────
+function analyzeFile(content, filePath) {
+  const refs = new Set();
+  const p = [
+    // JS/TS — import (covers: import x, import {x}, import * as x, import type x)
+    /\bimport\s+(?:type\s+)?(?:[\w$\s{},*]+\s+from\s+)?['"`]([^'"`\n]+)['"`]/g,
+    // JS/TS — require()
+    /\brequire\s*\(\s*['"`]([^'"`\n]+)['"`]\s*\)/g,
+    // JS/TS — export ... from
+    /\bexport\s+(?:type\s+)?(?:[\w$\s{},*]+\s+from\s+)?['"`]([^'"`\n]+)['"`]/g,
+    // JS/TS — dynamic import()
+    /\bimport\s*\(\s*['"`]([^'"`\n]+)['"`]\s*\)/g,
+    // CSS/SCSS — @import @use @forward
+    /@(?:import|use|forward)\s+(?:url\s*\(\s*)?['"]?([^'"\s);]+)['"]?\s*\)?/g,
+    // HTML — src href
+    /\b(?:src|href|action|data-src)\s*=\s*['"]([^'"#?\s][^'"]*)['"]/g,
+    // Python — from x import / import x
+    /^from\s+([\w./]+)\s+import/gm,
+    /^import\s+([\w./]+)/gm,
+    // Ruby — require / require_relative
+    /\brequire(?:_relative)?\s+['"]([^'"]+)['"]/g,
+    // Go — import "pkg"
+    /\bimport\s+(?:[\w]+\s+)?['"]([^'"]+)['"]/g,
+    // Rust — use / mod
+    /^use\s+([\w:./]+)/gm,
+    /^mod\s+([\w]+)/gm,
+    // Java/Kotlin/C# — import / using
+    /^import\s+(?:static\s+)?([\w./\\]+)/gm,
+    /^using\s+([\w.]+)/gm,
+    // C/C++ — #include
+    /#include\s+["<]([^>"]+)[">]/g,
+    // PHP — require include use
+    /\b(?:require|include)(?:_once)?\s+['"]([^'"]+)['"]/g,
+    /^use\s+([\w\\]+)/gm,
+    // GraphQL — #import
+    /#import\s+['"]([^'"]+)['"]/g,
+    // Dart — import
+    /^import\s+['"]([^'"]+)['"]/gm,
+    // Elixir
+    /^(?:import|alias|use)\s+([\w./]+)/gm,
+    // Lua
+    /\brequire\s*\(?['"]([^'"]+)['"]\)?/g,
+    // Shell source
+    /(?:^|\s)(?:source|\.)\s+([./][\w./\-]+)/gm,
+    // JSON $ref / $schema
+    /"\$(?:ref|schema)"\s*:\s*"([^"]+)"/g,
+    // Dockerfile COPY FROM ADD
+    /^(?:COPY|ADD)\s+(\S+)\s+/gm,
+    /^FROM\s+(\S+)/gm,
+    // Makefile include
+    /^include\s+(\S+)/gm,
+    // SVG/XML xlink:href href
+    /(?:xlink:href|href)\s*=\s*['"]([^'"#]+)['"]/g,
+  ];
+  for (const pat of p) {
+    pat.lastIndex = 0;
+    let m;
+    while ((m = pat.exec(content)) !== null) {
+      const val = (m[1] || '').trim();
+      if (val && !val.startsWith('http') && !val.startsWith('//') && !val.startsWith('data:') && val.length > 0 && val.length < 300) {
+        refs.add(val);
+      }
+    }
+  }
+  return [...refs];
+}
+
+function extractImports(content, filePath) {
+  return analyzeFile(content, filePath);
+}
+
+// ── ALIAS ROOT AUTO-DETECTION ─────────────────────────────────────────
+// Detects whether @/ maps to src/, app/, or root '' by scanning allFiles
+function detectAliasRoot(allFiles) {
+  const roots = ['src', 'app', ''];
+  for (const root of roots) {
+    const prefix = root ? root + '/' : '';
+    const hit = allFiles.some(f =>
+      f.startsWith(prefix + 'components/') ||
+      f.startsWith(prefix + 'hooks/') ||
+      f.startsWith(prefix + 'lib/') ||
+      f.startsWith(prefix + 'pages/') ||
+      f.startsWith(prefix + 'utils/')
+    );
+    if (hit) return prefix;
+  }
+  return '';
+}
+
+let _aliasRoot = null;
+function getAliasRoot(allFiles) {
+  if (_aliasRoot === null) _aliasRoot = detectAliasRoot(allFiles);
+  return _aliasRoot;
+}
+
+function resetAliasRoot() { _aliasRoot = null; }
+
+function resolveImport(importPath, fromFile, allFiles) {
+  const aliasRoot = getAliasRoot(allFiles);
+
+  // ── Alias resolution ──────────────────────────────────────────────
+  if (importPath.startsWith('@/')) importPath = aliasRoot + importPath.slice(2);
+  else if (importPath.startsWith('~/')) importPath = aliasRoot + importPath.slice(2);
+
+  // ── Skip external npm packages ────────────────────────────────────
+  if (!importPath.startsWith('.') && !importPath.startsWith('/')) {
+    // It may be a resolved alias like 'components/chat/Header'
+    const direct = allFiles.find(f =>
+      f === importPath ||
+      f.startsWith(importPath + '.') ||
+      f.startsWith(importPath + '/')
+    );
+    return direct || null;
+  }
+
+  const fromDir = fromFile.includes('/')
+    ? fromFile.substring(0, fromFile.lastIndexOf('/'))
+    : '';
+
+  const extensions = [
+    '', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+    '.py', '.rb', '.go', '.rs', '.java', '.kt', '.swift',
+    '.c', '.cpp', '.cs', '.php', '.dart', '.vue', '.svelte',
+    '.html', '.css', '.scss', '.sass', '.less',
+    '.json', '.yaml', '.yml', '.toml', '.xml',
+    '.graphql', '.gql', '.sql', '.sh', '.lua',
+    '/index.ts', '/index.tsx', '/index.js', '/index.jsx',
+    '/index.mjs', '/mod.ts', '/mod.js', '/main.go',
+    '/lib.rs', '/__init__.py',
+  ];
+
+  let base = importPath;
+  if (importPath.startsWith('./') || importPath.startsWith('../')) {
+    base = resolvePath(fromDir, importPath);
+  } else if (importPath.startsWith('/')) {
+    base = importPath.slice(1);
+  }
+
+  // If it already has a known extension — try direct match first
+  if (/\.[a-zA-Z0-9]+$/.test(base)) {
+    const clean = base.replace(/^\//, '');
+    const found = allFiles.find(f => f === clean || f.endsWith('/' + clean));
+    if (found) return found;
+  }
+
+  // Try with appended extensions
+  for (const ext of extensions) {
+    const candidate = (base + ext).replace(/^\//, '');
+    const found = allFiles.find(f => f === candidate || f.endsWith('/' + candidate));
+    if (found) return found;
+  }
+  return null;
+}
+
+function resolvePath(base, rel) {
+  const parts = base ? base.split('/') : [];
+  const relParts = rel.split('/');
+  for (const p of relParts) {
+    if (p === '..') parts.pop();
+    else if (p !== '.') parts.push(p);
+  }
+  return parts.join('/');
+}
+
+function detectCircular(edges) {
+  const adj = {};
+  edges.forEach(e => {
+    if (!adj[e.source]) adj[e.source] = [];
+    adj[e.source].push(e.target);
+  });
+
+  const circular = new Set();
+  const visited = new Set();
+  const stack = new Set();
+
+  function dfs(node, path) {
+    if (stack.has(node)) {
+      const idx = path.indexOf(node);
+      if (idx !== -1) {
+        const cycle = path.slice(idx);
+        cycle.forEach(n => circular.add(n));
+      }
+      return;
+    }
+    if (visited.has(node)) return;
+    visited.add(node); stack.add(node); path.push(node);
+    (adj[node] || []).forEach(next => dfs(next, [...path]));
+    stack.delete(node);
+  }
+
+  Object.keys(adj).forEach(n => dfs(n, []));
+  return circular;
+}
+
+// ── FILE COLOR BY EXTENSION ────────────────────────────────────────────
+function fileColor(name) {
+  const filename = name.split('/').pop().toLowerCase();
+  const ext = filename.includes('.') ? filename.split('.').pop() : filename;
+  const map = {
+    // JavaScript family
+    tsx: '#22d3ee', jsx: '#22d3ee',
+    ts: '#3b82f6', js: '#f59e0b', mjs: '#f59e0b', cjs: '#f59e0b',
+    // Web frameworks
+    vue: '#4ade80', svelte: '#fb923c',
+    // Styles
+    css: '#f472b6', scss: '#f472b6', sass: '#f472b6', less: '#f472b6', styl: '#f472b6',
+    // Python
+    py: '#34d399',
+    // Ruby
+    rb: '#e53e3e',
+    // Go
+    go: '#22d3ee',
+    // Rust
+    rs: '#fb923c',
+    // Java / Kotlin
+    java: '#fbbf24', kt: '#a78bfa', kts: '#a78bfa',
+    // C family
+    c: '#60a5fa', cpp: '#60a5fa', cc: '#60a5fa', h: '#93c5fd', hpp: '#93c5fd',
+    // C#
+    cs: '#818cf8',
+    // PHP
+    php: '#a78bfa',
+    // Swift / Dart
+    swift: '#fb923c', dart: '#38bdf8',
+    // HTML
+    html: '#f97316', htm: '#f97316',
+    // Data / Config
+    json: '#facc15', yaml: '#facc15', yml: '#facc15', toml: '#facc15', xml: '#facc15',
+    // Docs
+    md: '#94a3b8', mdx: '#94a3b8',
+    // Query
+    graphql: '#e879f9', gql: '#e879f9', sql: '#38bdf8',
+    // Shell
+    sh: '#4ade80', bash: '#4ade80', zsh: '#4ade80',
+    // Other
+    proto: '#818cf8', lua: '#60a5fa', r: '#60a5fa',
+    ex: '#a78bfa', exs: '#a78bfa',
+    zig: '#fb923c', nim: '#f59e0b', dart: '#38bdf8',
+  };
+  // Special filenames
+  if (filename === 'dockerfile' || filename.startsWith('dockerfile.')) return '#38bdf8';
+  if (filename.endsWith('.env') || filename.startsWith('.env')) return '#facc15';
+  return map[ext] || '#8888a0';
+}
+
+function detectEdgeType(ref, content) {
+  if (/@import|@use|@forward/.test(ref) || ref.endsWith('.css') || ref.endsWith('.scss')) return 'style';
+  if (ref.endsWith('.json') || ref.endsWith('.yaml') || ref.endsWith('.yml') || ref.endsWith('.toml')) return 'data';
+  if (ref.endsWith('.html') || ref.endsWith('.htm') || ref.endsWith('.svg')) return 'asset';
+  if (ref.endsWith('.graphql') || ref.endsWith('.gql')) return 'query';
+  if (/require\s*\(/.test(content)) return 'require';
+  return 'import';
+}
+
+const EDGE_COLORS = {
+  import: '#3a3a5c',
+  require: '#2a4a3a',
+  style: '#4a2a4a',
+  data: '#3a4a2a',
+  asset: '#4a3a2a',
+  query: '#2a3a4a',
+};
+
+function shortName(path) {
+  return path.split('/').pop();
+}
+
+// ── PROCESS ZIP ────────────────────────────────────────────────────────
+async function processZip(file) {
+  showToast('Reading ZIP...');
+  resetAliasRoot();
+  const zip = await JSZip.loadAsync(file);
+  const allFiles = [];
+  const fileContents = {};
+
+  const ignore = /node_modules|\.git|\.next|__pycache__|\.DS_Store|\.min\.|\.map$/;
+
+  for (const [path, entry] of Object.entries(zip.files)) {
+    if (entry.dir) continue;
+    if (ignore.test(path)) continue;
+    const cleanPath = path.replace(/^[^/]+\//, ''); // strip top-level folder
+    if (!SUPPORTED.test(cleanPath)) continue;
+    try {
+      const content = await entry.async('string');
+      allFiles.push(cleanPath);
+      fileContents[cleanPath] = content;
+    } catch (e) {}
+  }
+
+  if (allFiles.length === 0) {
+    showToast('No supported source files found in ZIP.');
+    return;
+  }
+
+  showToast(`Analyzing ${allFiles.length} files...`);
+
+  const edges = [];
+  const edgeSet = new Set();
+
+  for (const file of allFiles) {
+    const refs = analyzeFile(fileContents[file] || '', file);
+    for (const ref of refs) {
+      const resolved = resolveImport(ref, file, allFiles);
+      if (resolved && resolved !== file) {
+        const key = `${file}→${resolved}`;
+        if (!edgeSet.has(key)) {
+          edgeSet.add(key);
+          const edgeType = detectEdgeType(ref, fileContents[file] || '');
+          edges.push({ source: file, target: resolved, type: edgeType });
+        }
+      }
+    }
+  }
+
+  const connected = new Set();
+  edges.forEach(e => { connected.add(e.source); connected.add(e.target); });
+  // Show ALL files
+  const nodes = allFiles.map(f => ({ id: f, color: fileColor(f), isolated: !connected.has(f) }));
+
+  circularPairs = detectCircular(edges);
+  graphData = { nodes, edges };
+
+  currentView = 'force';
+  renderGraph();
+  renderSidebar();
+  updateStats();
+  document.getElementById('dropzone').style.display = 'none';
+  document.getElementById('controls').style.display = 'flex';
+  document.getElementById('legend').style.display = 'flex';
+  document.getElementById('btn-layout').style.display = 'flex';
+  document.getElementById('btn-new').style.display = 'flex';
+  document.getElementById('header-stats').style.display = 'flex';
+  document.getElementById('view-switcher').classList.add('visible');
+
+  if (circularPairs.size > 0) {
+    const badge = document.getElementById('circular-badge');
+    badge.textContent = `⚠ ${circularPairs.size} circular dependenc${circularPairs.size === 1 ? 'y' : 'ies'} detected`;
+    badge.style.display = 'block';
+  }
+
+  showToast(`✓ ${nodes.length} files · ${edges.length} dependencies mapped`);
+}
+
+// ── RENDER GRAPH ───────────────────────────────────────────────────────
+function renderGraph() {
+  const svg = document.getElementById('view-force');
+  svg.style.display = 'block';
+  const g = document.getElementById('zoom-group');
+  g.innerHTML = '';
+
+  const W = svg.clientWidth || 900;
+  const H = svg.clientHeight || 600;
+
+  const nodes = graphData.nodes.map(n => ({ ...n }));
+  const edges = graphData.edges.map(e => ({ ...e }));
+
+  // Force simulation
+  simulation = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(edges).id(d => d.id).distance(120).strength(0.5))
+    .force('charge', d3.forceManyBody().strength(-280))
+    .force('center', d3.forceCenter(W / 2, H / 2))
+    .force('collision', d3.forceCollide(60));
+
+  // Zoom
+  svgZoom = d3.zoom().scaleExtent([0.1, 4]).on('zoom', e => {
+    d3.select(g).attr('transform', e.transform);
+  });
+  d3.select(svg).call(svgZoom);
+
+  const svgSel = d3.select(g);
+
+  // Links
+  const link = svgSel.append('g').selectAll('line')
+    .data(edges).join('line')
+    .attr('class', 'link')
+    .attr('id', (d, i) => `link-${i}`)
+    .style('stroke', d => EDGE_COLORS[d.type] || EDGE_COLORS.import)
+    .attr('stroke-dasharray', d => d.type === 'style' ? '4,3' : d.type === 'data' ? '2,3' : null);
+
+  // Nodes
+  const nodeGroup = svgSel.append('g').selectAll('g')
+    .data(nodes).join('g')
+    .attr('class', 'node-group')
+    .attr('id', d => `node-${CSS.escape(d.id)}`)
+    .call(d3.drag()
+      .on('start', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y; })
+      .on('end', (event, d) => {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null; d.fy = null;
+      })
+    )
+    .on('click', (event, d) => {
+      event.stopPropagation();
+      selectNode(d, link, nodeGroup);
+    });
+
+  // Node rects
+  nodeGroup.style('opacity', d => d.isolated ? 0.4 : 1)
+  nodeGroup.append('rect')
+    .attr('class', 'node-rect')
+    .attr('rx', 8)
+    .attr('width', d => Math.max(shortName(d.id).length * 7 + 24, 80))
+    .attr('height', 34)
+    .attr('x', d => -(Math.max(shortName(d.id).length * 7 + 24, 80)) / 2)
+    .attr('y', -17)
+    .attr('stroke', d => circularPairs.has(d.id) ? 'rgba(248,113,113,0.6)' : undefined);
+
+  // Color indicator
+  nodeGroup.append('rect')
+    .attr('rx', 3)
+    .attr('width', 3).attr('height', 18)
+    .attr('x', d => -(Math.max(shortName(d.id).length * 7 + 24, 80)) / 2 + 8)
+    .attr('y', -9)
+    .attr('fill', d => d.color);
+
+  // Labels
+  nodeGroup.append('text')
+    .attr('class', 'node-label')
+    .attr('dy', '0.35em')
+    .attr('x', d => -(Math.max(shortName(d.id).length * 7 + 24, 80)) / 2 + 18)
+    .text(d => shortName(d.id));
+
+  // Click on background to deselect
+  d3.select(svg).on('click', () => {
+    selectedNode = null;
+    nodeGroup.classed('selected', false).classed('highlighted', false).classed('dimmed', false);
+    link.classed('highlighted', false).classed('dimmed', false);
+    updateInfoPanel(null);
+  });
+
+  simulation.on('tick', () => {
+    link
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    nodeGroup.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+}
+
+function selectNode(d, link, nodeGroup) {
+  selectedNode = d.id;
+
+  const connected = new Set();
+  connected.add(d.id);
+  graphData.edges.forEach(e => {
+    if (e.source.id === d.id || e.source === d.id) connected.add(e.target.id || e.target);
+    if (e.target.id === d.id || e.target === d.id) connected.add(e.source.id || e.source);
+  });
+
+  nodeGroup
+    .classed('selected', n => n.id === d.id)
+    .classed('highlighted', n => n.id !== d.id && connected.has(n.id))
+    .classed('dimmed', n => !connected.has(n.id));
+
+  link
+    .classed('highlighted', e => (e.source.id || e.source) === d.id || (e.target.id || e.target) === d.id)
+    .classed('dimmed', e => (e.source.id || e.source) !== d.id && (e.target.id || e.target) !== d.id);
+
+  updateInfoPanel(d);
+  highlightSidebar(d.id);
+}
+
+function updateInfoPanel(d) {
+  const panel = document.getElementById('info-panel');
+  if (!d) {
+    panel.innerHTML = `<div class="info-title">Details</div><div class="info-empty">Click a node to inspect</div>`;
+    return;
+  }
+  const imports = graphData.edges.filter(e => (e.source.id || e.source) === d.id);
+  const importedBy = graphData.edges.filter(e => (e.target.id || e.target) === d.id);
+  const isCircular = circularPairs.has(d.id);
+
+  panel.innerHTML = `
+    <div class="info-title">Details</div>
+    <div class="info-filename">${d.id}</div>
+    ${isCircular ? `<div style="font-size:11px;color:var(--red);margin-bottom:8px;">⚠ Part of circular dependency</div>` : ''}
+    <div class="info-row"><span>References</span><b>${imports.length}</b></div>
+    <div class="info-row"><span>Referenced by</span><b>${importedBy.length}</b></div>
+    ${imports.length ? `<div class="info-imports">${imports.slice(0,10).map(e => {
+    const t = e.target.id || e.target; const ty = e.type || 'import';
+    const typeColors = {import:'#7c6aff',require:'#34d399',style:'#f472b6',data:'#facc15',asset:'#fb923c',query:'#e879f9'};
+    return `<div class="info-import-item"><span style="font-size:9px;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,0.06);color:${typeColors[ty]||'#aaa'};margin-right:4px;">${ty}</span>${shortName(t)}</div>`;
+  }).join('')}${imports.length > 10 ? `<div class="info-import-item" style="color:var(--text3)">+${imports.length-10} more</div>` : ''}</div>` : ''}
+  `;
+}
+
+function highlightSidebar(id) {
+  document.querySelectorAll('.file-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.id === id);
+  });
+  const sel = document.querySelector(`.file-item[data-id="${CSS.escape(id)}"]`);
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+
+function renderSidebar() {
+  const list = document.getElementById('file-list');
+  const sorted = [...graphData.nodes].sort((a, b) => {
+    const ac = graphData.edges.filter(e => (e.source.id||e.source) === a.id || (e.target.id||e.target) === a.id).length;
+    const bc = graphData.edges.filter(e => (e.source.id||e.source) === b.id || (e.target.id||e.target) === b.id).length;
+    return bc - ac;
+  });
+
+  list.innerHTML = sorted.map(n => {
+    const count = graphData.edges.filter(e => (e.source.id||e.source) === n.id || (e.target.id||e.target) === n.id).length;
+    return `<div class="file-item" data-id="${n.id}" onclick="sidebarClick('${n.id.replace(/'/g,"\\'")}')">
+      <div class="file-dot" style="background:${n.color}"></div>
+      <span class="file-name" title="${n.id}">${shortName(n.id)}</span>
+      <span class="file-count">${count}</span>
+    </div>`;
+  }).join('');
+}
+
+function sidebarClick(id) {
+  const svg = document.getElementById('graph-svg');
+  const nodeGroups = d3.select('#zoom-group').selectAll('.node-group');
+  const links = d3.select('#zoom-group').selectAll('.link');
+  const node = graphData.nodes.find(n => n.id === id);
+  if (node) selectNode(node, links, nodeGroups);
+}
+
+function updateStats() {
+  document.getElementById('stat-files').textContent = graphData.nodes.length;
+  document.getElementById('stat-deps').textContent = graphData.edges.length;
+  document.getElementById('stat-circular').textContent = circularPairs.size;
+}
+
+
+// ── CURRENT VIEW STATE ─────────────────────────────────────────────────
+let currentView = 'force';
+
+function switchView(name) {
+  if (currentView === name) return;
+  if (simulation && name !== 'force') simulation.stop();
+  currentView = name;
+
+  // hide all
+  ['view-force','view-sunburst','view-matrix-wrap','view-treemap','view-arc'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+  document.querySelectorAll('.vs-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('vs-'+name)?.classList.add('active');
+
+  const showCtrl = name === 'force';
+  document.getElementById('controls').style.display = showCtrl ? 'flex' : 'none';
+  document.getElementById('legend').style.display = showCtrl ? 'flex' : 'none';
+  document.getElementById('btn-layout').style.display = showCtrl ? 'flex' : 'none';
+
+  if (name === 'force') {
+    document.getElementById('view-force').style.display = 'block';
+    if (simulation) simulation.restart();
+  } else if (name === 'sunburst') {
+    document.getElementById('view-sunburst').style.display = 'block';
+    renderSunburst();
+  } else if (name === 'matrix') {
+    document.getElementById('view-matrix-wrap').style.display = 'block';
+    renderMatrix();
+  } else if (name === 'treemap') {
+    document.getElementById('view-treemap').style.display = 'block';
+    renderTreemap();
+  } else if (name === 'arc') {
+    document.getElementById('view-arc').style.display = 'block';
+    renderArc();
+  }
+}
+
+// ── SUNBURST ──────────────────────────────────────────────────────────
+function renderSunburst() {
+  const svg = document.getElementById('view-sunburst');
+  const W = svg.clientWidth || 700, H = svg.clientHeight || 600;
+  const cx = W/2, cy = H/2, r0 = 40, r1 = 90, r2 = 160;
+
+  const folders = [...new Set(graphData.nodes.map(n => n.id.split('/')[0] || 'root'))];
+  const folderMap = {};
+  graphData.nodes.forEach(n => {
+    const folder = n.id.split('/')[0] || 'root';
+    if (!folderMap[folder]) folderMap[folder] = [];
+    folderMap[folder].push(n);
+  });
+  const N = graphData.nodes.length || 1;
+
+  let html = `<defs><marker id="sb-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L0,6 L6,3 z" fill="#7c6aff"/></marker></defs>`;
+  html += `<circle cx="${cx}" cy="${cy}" r="${r0}" fill="var(--bg2)" stroke="var(--border)" stroke-width="1"/>`;
+  html += `<text x="${cx}" y="${cy-7}" text-anchor="middle" font-size="13" font-weight="600" fill="var(--text)">${N}</text>`;
+  html += `<text x="${cx}" y="${cy+9}" text-anchor="middle" font-size="10" fill="var(--text2)">files</text>`;
+
+  let angle = -Math.PI/2;
+
+  folders.forEach(folder => {
+    const fNodes = folderMap[folder] || [];
+    const sweep = (fNodes.length / N) * Math.PI * 2;
+    const mid = angle + sweep/2;
+    const lg = sweep > Math.PI ? 1 : 0;
+
+    // folder arc (middle ring)
+    const ax1=cx+Math.cos(angle)*r1, ay1=cy+Math.sin(angle)*r1;
+    const ax2=cx+Math.cos(angle+sweep)*r1, ay2=cy+Math.sin(angle+sweep)*r1;
+    const ax3=cx+Math.cos(angle+sweep)*r2, ay3=cy+Math.sin(angle+sweep)*r2;
+    const ax4=cx+Math.cos(angle)*r2, ay4=cy+Math.sin(angle)*r2;
+    const col = folderColors(folder);
+
+    html += `<path d="M${ax1},${ay1} A${r1},${r1} 0 ${lg} 1 ${ax2},${ay2} L${ax3},${ay3} A${r2},${r2} 0 ${lg} 0 ${ax4},${ay4} Z" fill="${col}" opacity="0.75" stroke="var(--bg)" stroke-width="1.5" style="cursor:pointer" onclick="highlightFolder('${folder}')"/>`;
+
+    // folder label
+    if (sweep > 0.35) {
+      const lx = cx + Math.cos(mid) * (r1 + (r2-r1)*0.5);
+      const ly = cy + Math.sin(mid) * (r1 + (r2-r1)*0.5);
+      html += `<text x="${lx}" y="${ly+4}" text-anchor="middle" font-size="9" font-weight="600" fill="#fff" pointer-events="none">${folder.slice(0,8)}</text>`;
+    }
+
+    // file arcs (outer ring)
+    let fAngle = angle;
+    fNodes.forEach(node => {
+      const fSweep = (1/N) * Math.PI*2;
+      const depCount = graphData.edges.filter(e => (e.source.id||e.source)===node.id || (e.target.id||e.target)===node.id).length;
+      const outerR = r2 + 20 + Math.min(depCount * 12, 60);
+      const fx1=cx+Math.cos(fAngle)*r2, fy1=cy+Math.sin(fAngle)*r2;
+      const fx2=cx+Math.cos(fAngle+fSweep)*r2, fy2=cy+Math.sin(fAngle+fSweep)*r2;
+      const fx3=cx+Math.cos(fAngle+fSweep)*outerR, fy3=cy+Math.sin(fAngle+fSweep)*outerR;
+      const fx4=cx+Math.cos(fAngle)*outerR, fy4=cy+Math.sin(fAngle)*outerR;
+      const fName = shortName(node.id);
+      html += `<path data-id="${node.id}" d="M${fx1},${fy1} A${r2},${r2} 0 0 1 ${fx2},${fy2} L${fx3},${fy3} A${outerR},${outerR} 0 0 0 ${fx4},${fy4} Z" fill="${col}" opacity="${0.35 + Math.min(depCount/10, 0.55)}" stroke="var(--bg)" stroke-width="1" style="cursor:pointer" onclick="sbSelectNode('${node.id}')" title="${fName} · ${depCount} connections"/>`;
+      if (fSweep > 0.12 && (outerR - r2) > 16) {
+        const fMid = fAngle + fSweep/2;
+        const fLR = r2 + (outerR-r2)*0.5;
+        html += `<text x="${cx+Math.cos(fMid)*fLR}" y="${cy+Math.sin(fMid)*fLR+3}" text-anchor="middle" font-size="8" fill="#fff" opacity="0.9" pointer-events="none">${fName.slice(0,6)}</text>`;
+      }
+      fAngle += fSweep;
+    });
+    angle += sweep;
+  });
+
+  svg.innerHTML = html;
+}
+
+function folderColors(folder) {
+  const map = { app:'#7c6aff', components:'#22d3ee', hooks:'#34d399', lib:'#f59e0b', types:'#f472b6', ui:'#3b82f6', config:'#a78bfa', utils:'#fb923c', pages:'#e879f9', api:'#38bdf8', store:'#4ade80', styles:'#f472b6' };
+  const keys = Object.keys(map);
+  const idx = [...folder].reduce((s,c)=>s+c.charCodeAt(0),0) % keys.length;
+  return map[folder] || map[keys[idx]] || '#8888a0';
+}
+
+function sbSelectNode(id) {
+  updateInfoPanel({ id });
+  highlightSidebar(id);
+  document.querySelectorAll('#view-sunburst path[data-id]').forEach(p => {
+    p.style.opacity = p.dataset.id === id ? '1' : '0.2';
+  });
+}
+function highlightFolder(folder) {
+  document.querySelectorAll('#view-sunburst path[data-id]').forEach(p => {
+    const pFolder = p.dataset.id ? p.dataset.id.split('/')[0] : '';
+    p.style.opacity = pFolder === folder ? '1' : '0.2';
+  });
+}
+
+// ── MATRIX ────────────────────────────────────────────────────────────
+function renderMatrix() {
+  const nodes = graphData.nodes;
+  const N = nodes.length;
+  if (!N) return;
+
+  // build transitive closure
+  const adj = Array.from({length:N}, (_,i) => new Set());
+  graphData.edges.forEach(e => {
+    const si = nodes.findIndex(n => n.id === (e.source.id||e.source));
+    const ti = nodes.findIndex(n => n.id === (e.target.id||e.target));
+    if (si>=0 && ti>=0) adj[si].add(ti);
+  });
+  function trans(i, visited=new Set()) {
+    if (visited.has(i)) return visited;
+    visited.add(i);
+    adj[i].forEach(j => trans(j, visited));
+    return visited;
+  }
+  const transClosure = nodes.map((_,i) => trans(i));
+
+  let html = '<thead><tr><th></th>';
+  nodes.forEach(n => html += `<th class="mx-col-label" title="${n.id}">${shortName(n.id)}</th>`);
+  html += '</tr></thead><tbody>';
+
+  nodes.forEach((rn, ri) => {
+    html += `<tr><td class="mx-row-label" title="${rn.id}">${shortName(rn.id)}</td>`;
+    nodes.forEach((cn, ci) => {
+      const direct = adj[ri].has(ci);
+      const tran = !direct && transClosure[ri].has(ci) && ri !== ci;
+      const diag = ri === ci;
+      const cls = diag ? 'mx-cell diagonal' : direct ? 'mx-cell direct' : tran ? 'mx-cell transitive' : 'mx-cell';
+      html += `<td class="${cls}" onmouseenter="mxHover(${ri},${ci})" onmouseleave="mxUnhover()" title="${direct?'Direct import':tran?'Transitive':'No relation'}"></td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody>';
+  document.getElementById('mx-table').innerHTML = html;
+}
+
+function mxHover(ri, ci) {
+  const N = graphData.nodes.length;
+  document.querySelectorAll('#mx-table .mx-cell').forEach((el, idx) => {
+    const row = Math.floor(idx/N), col = idx%N;
+    if (row===ri || col===ci) el.classList.add('row-hi');
+  });
+}
+function mxUnhover() {
+  document.querySelectorAll('#mx-table .mx-cell').forEach(el => el.classList.remove('row-hi'));
+}
+
+// ── TREEMAP ───────────────────────────────────────────────────────────
+function renderTreemap() {
+  const container = document.getElementById('view-treemap');
+  const W = container.clientWidth || 700, H = container.clientHeight || 600;
+  container.querySelectorAll('.tm-block').forEach(el => el.remove());
+
+  const scored = graphData.nodes.map((n,i) => {
+    const imports = graphData.edges.filter(e => (e.source.id||e.source)===n.id).length;
+    const importedBy = graphData.edges.filter(e => (e.target.id||e.target)===n.id).length;
+    return { ...n, imports, importedBy, total: imports + importedBy };
+  }).sort((a,b) => b.total - a.total);
+
+  if (!scored.length) return;
+  const maxTotal = scored[0].total || 1;
+
+  // Squarify layout
+  function squarify(items, x, y, w, h) {
+    if (!items.length) return [];
+    const rects = [];
+    let remaining = [...items];
+    let rx=x, ry=y, rw=w, rh=h;
+
+    while (remaining.length) {
+      const isHoriz = rw >= rh;
+      const row = [];
+      let rowArea = 0;
+      let i = 0;
+      for (; i < remaining.length; i++) {
+        const test = [...row, remaining[i]];
+        const testArea = test.reduce((s,it) => s + it.area, 0);
+        const side = isHoriz ? rh : rw;
+        const worst = (items2, side2) => {
+          const s = items2.reduce((a,it) => a+it.area, 0);
+          return Math.max(...items2.map(it => Math.max(side2*side2*it.area/(s*s), s*s/(side2*side2*it.area))));
+        };
+        if (row.length && worst(test, side) > worst(row, side)) break;
+        row.push(remaining[i]);
+        rowArea = testArea;
+      }
+      remaining = remaining.slice(row.length);
+      const side = isHoriz ? rh : rw;
+      const rowLen = rowArea / side;
+      let pos = isHoriz ? rx : ry;
+      row.forEach(item => {
+        const len = item.area / rowLen;
+        if (isHoriz) {
+          rects.push({ item, x:rx, y:pos, w:rowLen, h:len });
+          pos += len;
+        } else {
+          rects.push({ item, x:pos, y:ry, w:len, h:rowLen });
+          pos += len;
+        }
+      });
+      if (isHoriz) { rx += rowLen; rw -= rowLen; }
+      else { ry += rowLen; rh -= rowLen; }
+    }
+    return rects;
+  }
+
+  const total = scored.reduce((s,n) => s + Math.max(n.total, 0.5), 0);
+  const items = scored.map(n => ({ ...n, area: (Math.max(n.total,0.5)/total) * W * H }));
+  const rects = squarify(items, 0, 0, W, H);
+  const tip = document.getElementById('tm-tip');
+
+  rects.forEach(({ item, x, y, w, h }) => {
+    if (w < 10 || h < 10) return;
+    const div = document.createElement('div');
+    div.className = 'tm-block';
+    div.style.cssText = `left:${x.toFixed(1)}px;top:${y.toFixed(1)}px;width:${(w-2).toFixed(1)}px;height:${(h-2).toFixed(1)}px;background:${item.color}22;border-color:${item.color}55;`;
+    if (w > 36 && h > 28) {
+      const fs = Math.min(11, Math.max(8, w/10));
+      div.innerHTML = `<div class="tm-name" style="color:${item.color};font-size:${fs}px">${shortName(item.id)}</div>${h>40?`<div class="tm-info" style="color:${item.color}">${item.total} links</div>`:''}`;
+    }
+    div.addEventListener('mouseenter', () => {
+      tip.textContent = `${item.id} · ${item.imports} imports · ${item.importedBy} imported by`;
+      tip.style.display = 'block';
+      updateInfoPanel(item);
+      highlightSidebar(item.id);
+    });
+    div.addEventListener('mouseleave', () => tip.style.display = 'none');
+    div.addEventListener('click', () => { updateInfoPanel(item); highlightSidebar(item.id); });
+    container.appendChild(div);
+  });
+}
+
+// ── ARC DIAGRAM ───────────────────────────────────────────────────────
+function renderArc() {
+  const container = document.getElementById('view-arc');
+  const cW = container.clientWidth || 700;
+  const nodes = graphData.nodes;
+  const N = nodes.length;
+  if (!N) return;
+
+  const pad = { l:60, r:60, t:30, b:100 };
+  const innerW = Math.max(cW - pad.l - pad.r, N * 28);
+  const W = innerW + pad.l + pad.r;
+  const maxArcH = 220;
+  const H = maxArcH + pad.t + pad.b + 20;
+  const baseY = maxArcH + pad.t;
+  const step = innerW / Math.max(N-1, 1);
+
+  const svg = document.getElementById('arc-svg');
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  function nx(i) { return pad.l + i * step; }
+
+  let html = '';
+
+  // Draw arcs
+  graphData.edges.forEach(e => {
+    const si = nodes.findIndex(n => n.id === (e.source.id||e.source));
+    const ti = nodes.findIndex(n => n.id === (e.target.id||e.target));
+    if (si<0||ti<0||si===ti) return;
+    const x1=nx(si), x2=nx(ti);
+    const mid=(x1+x2)/2;
+    const dist=Math.abs(ti-si);
+    const arcH=Math.min(dist*step*0.6, maxArcH);
+    const col=nodes[si].color;
+    html += `<path class="arc-link" data-s="${si}" data-t="${ti}" d="M${x1},${baseY} Q${mid},${baseY-arcH} ${x2},${baseY}" stroke="${col}" stroke-width="1.5" onmouseenter="arcHover(${si},${ti})" onmouseleave="arcUnhover()"/>`;
+  });
+
+  // Nodes
+  nodes.forEach((n,i) => {
+    const x=nx(i);
+    const connCount=graphData.edges.filter(e=>(e.source.id||e.source)===n.id||(e.target.id||e.target)===n.id).length;
+    const r=Math.max(4, Math.min(10, 3+connCount));
+    html += `<circle class="arc-node-circle" data-idx="${i}" cx="${x}" cy="${baseY}" r="${r}" fill="${n.color}" stroke="var(--bg)" stroke-width="1.5" onmouseenter="arcHover(${i},-1)" onmouseleave="arcUnhover()" onclick="arcClick('${n.id}')"/>`;
+  });
+
+  // Labels (angled)
+  nodes.forEach((n,i) => {
+    const x=nx(i), y=baseY+14;
+    html += `<text x="${x}" y="${y}" text-anchor="end" transform="rotate(-45,${x},${y})" font-size="10" font-weight="500" fill="${n.color}" pointer-events="none">${shortName(n.id)}</text>`;
+  });
+
+  svg.innerHTML = html;
+}
+
+function arcHover(s, t) {
+  document.querySelectorAll('.arc-link').forEach(p => {
+    const ps=parseInt(p.dataset.s), pt=parseInt(p.dataset.t);
+    const rel=(t===-1)?(ps===s||pt===s):(ps===s&&pt===t||ps===t&&pt===s);
+    p.style.opacity=rel?'1':'0.06';
+    p.style.strokeWidth=rel?'2.5':'1';
+  });
+  document.querySelectorAll('.arc-node-circle').forEach(c => {
+    const ci=parseInt(c.dataset.idx);
+    const rel=ci===s||(t>=0&&ci===t);
+    c.style.opacity=rel?'1':'0.2';
+  });
+}
+function arcUnhover() {
+  document.querySelectorAll('.arc-link').forEach(p=>{p.style.opacity='';p.style.strokeWidth='';});
+  document.querySelectorAll('.arc-node-circle').forEach(c=>c.style.opacity='');
+}
+function arcClick(id) {
+  const node = graphData.nodes.find(n => n.id===id);
+  if (node) { updateInfoPanel(node); highlightSidebar(id); }
+}
+
+// ── ZOOM CONTROLS ──────────────────────────────────────────────────────
+function zoomIn() {
+  d3.select('#view-force').transition().call(svgZoom.scaleBy, 1.4);
+}
+function zoomOut() {
+  d3.select('#view-force').transition().call(svgZoom.scaleBy, 0.7);
+}
+function zoomFit() {
+  const svg = document.getElementById('view-force');
+  const g = document.getElementById('zoom-group');
+  const bounds = g.getBBox();
+  const W = svg.clientWidth, H = svg.clientHeight;
+  const scale = Math.min(W / bounds.width, H / bounds.height) * 0.85;
+  const tx = W/2 - scale * (bounds.x + bounds.width/2);
+  const ty = H/2 - scale * (bounds.y + bounds.height/2);
+  d3.select(svg).transition().duration(500)
+    .call(svgZoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+}
+function resetLayout() {
+  if (simulation) { simulation.alpha(1).restart(); }
+}
+function resetAll() {
+  graphData = { nodes: [], edges: [] };
+  circularPairs = new Set();
+  selectedNode = null;
+  ['view-force','view-sunburst','view-matrix-wrap','view-treemap','view-arc'].forEach(id => { const el=document.getElementById(id); if(el) el.style.display='none'; });
+  document.getElementById('view-switcher').classList.remove('visible');
+  document.getElementById('dropzone').style.display = 'flex';
+  document.getElementById('controls').style.display = 'none';
+  document.getElementById('legend').style.display = 'none';
+  document.getElementById('btn-layout').style.display = 'none';
+  document.getElementById('btn-new').style.display = 'none';
+  document.getElementById('header-stats').style.display = 'none';
+  document.getElementById('circular-badge').style.display = 'none';
+  document.getElementById('file-list').innerHTML = `<div style="padding:16px;font-size:12px;color:var(--text3);font-style:italic;">No project loaded</div>`;
+  document.getElementById('info-panel').innerHTML = `<div class="info-title">Details</div><div class="info-empty">Click a node to inspect</div>`;
+  if (simulation) simulation.stop();
+}
+
+// ── TOAST ──────────────────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ── DRAG & DROP ────────────────────────────────────────────────────────
+const dropBox = document.getElementById('drop-box');
+dropBox.addEventListener('dragover', e => { e.preventDefault(); dropBox.classList.add('dragover'); });
+dropBox.addEventListener('dragleave', () => dropBox.classList.remove('dragover'));
+dropBox.addEventListener('drop', e => {
+  e.preventDefault(); dropBox.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file && file.name.endsWith('.zip')) processZip(file);
+  else showToast('Please drop a .zip file');
+});
+
+document.getElementById('file-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (file) processZip(file);
+});
+
+document.getElementById('folder-input').addEventListener('change', async e => {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  await processFolder(files);
+  e.target.value = '';
+});
+
+// keyboard shortcut
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    selectedNode = null;
+    d3.selectAll('.node-group').classed('selected',false).classed('highlighted',false).classed('dimmed',false);
+    d3.selectAll('.link').classed('highlighted',false).classed('dimmed',false);
+    updateInfoPanel(null);
+  }
+  if (e.key === 'f' || e.key === 'F') zoomFit();
+});
+</script>
+</body>
+</html>
